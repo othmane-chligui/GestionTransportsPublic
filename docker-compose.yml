@@ -1,0 +1,193 @@
+version: '3.8'
+
+services:
+  # MySQL Database for ServiceLignes
+  mysql-lignes:
+    image: mysql:8.0
+    container_name: mysql-lignes
+    environment:
+      MYSQL_DATABASE: lignes_db
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ALLOW_EMPTY_PASSWORD: 'no'
+    ports:
+      - "3307:3306"
+    volumes:
+      - lignes-data:/var/lib/mysql
+    networks:
+      - transport-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MySQL Database for ServiceStations
+  mysql-stations:
+    image: mysql:8.0
+    container_name: mysql-stations
+    environment:
+      MYSQL_DATABASE: stations_db
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ALLOW_EMPTY_PASSWORD: 'no'
+    ports:
+      - "3308:3306"
+    volumes:
+      - stations-data:/var/lib/mysql
+    networks:
+      - transport-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MySQL Database for ServiceHoraires
+  mysql-horaires:
+    image: mysql:8.0
+    container_name: mysql-horaires
+    environment:
+      MYSQL_DATABASE: horaires_db
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ALLOW_EMPTY_PASSWORD: 'no'
+    ports:
+      - "3309:3306"
+    volumes:
+      - horaires-data:/var/lib/mysql
+    networks:
+      - transport-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Eureka Server (Service Discovery)
+  eureka-server:
+    build:
+      context: ./eureka-server
+      dockerfile: Dockerfile
+    container_name: eureka-server
+    ports:
+      - "8761:8761"
+    networks:
+      - transport-network
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8761/actuator/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ServiceLignes
+  service-lignes:
+    build:
+      context: ./ServiceLignes
+      dockerfile: Dockerfile
+    container_name: service-lignes
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-lignes:3306/lignes_db
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    ports:
+      - "8081:8081"
+    depends_on:
+      mysql-lignes:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - transport-network
+    restart: on-failure
+
+  # ServiceStations
+  service-stations:
+    build:
+      context: ./ServiceStations
+      dockerfile: Dockerfile
+    container_name: service-stations
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-stations:3306/stations_db
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    ports:
+      - "8082:8082"
+    depends_on:
+      mysql-stations:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - transport-network
+    restart: on-failure
+
+  # ServiceHoraires
+  service-horaires:
+    build:
+      context: ./ServiceHoraires
+      dockerfile: Dockerfile
+    container_name: service-horaires
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-horaires:3306/horaires_db
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    ports:
+      - "8083:8083"
+    depends_on:
+      mysql-horaires:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - transport-network
+    restart: on-failure
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    ports:
+      - "8080:8080"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      service-lignes:
+        condition: service_started
+      service-stations:
+        condition: service_started
+      service-horaires:
+        condition: service_started
+    networks:
+      - transport-network
+    restart: on-failure
+
+  # Frontend (React + Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - transport-network
+
+networks:
+  transport-network:
+    driver: bridge
+
+volumes:
+  lignes-data:
+  stations-data:
+  horaires-data:
